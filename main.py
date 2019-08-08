@@ -2,8 +2,8 @@ import argparse
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.distributions as dist
+import mbpa as MBPA
 
-from utils  import *
 from data   import *
 from buffer import Buffer
 from copy   import deepcopy
@@ -124,7 +124,7 @@ for run in range(args.n_runs):
                         opt.step()
                     
                 # add data to reservoir
-                buffer.add_reservoir(data, target, logits, task)
+                buffer.add_reservoir(data, target, task)
             
             # buffer.display()
             print('Task {}\t Epoch {}\t Loss {:.6f}\t, Acc {:.6f}'.format(task, epoch, loss_ / i, correct / deno))
@@ -140,14 +140,25 @@ with (torch.enable_grad if args.mbpa else torch.no_grad)():
         model = model.eval()
         accuracies = []
 
+        if args.mbpa:
+            with torch.no_grad():
+                key_gen = MBPA.init_keys(args)
+                buffer.keys = key_gen(buffer.bx)
+
         for task, loader in enumerate(test_loader):
             # iterate over samples from task
             loss_, correct, deno = 0., 0., 0.
             for i, (data, target) in enumerate(loader):
+                if args.mbpa and i > 2: break
+
                 data, target = data.to(args.device), target.to(args.device)
                 
                 if args.mbpa:
-                    pred = MBPA(model, data, args)
+                    with torch.no_grad():
+                        data_keys = key_gen(data)
+                        fetched_xy = MBPA.find_closest(buffer, data_keys, args)
+
+                    pred = MBPA.predict(model, fetched_xy, data, args).unsqueeze(1)
                 else:
                     logits = model(data)
                     pred = logits.argmax(dim=1, keepdim=True)

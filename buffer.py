@@ -19,15 +19,10 @@ class Buffer(nn.Module):
         # for reservoir only (nb: not actually used)
         self.min_per_class = args.mem_size * args.n_tasks 
 
-        # for VQ-VAE, we save indices, not actual floats
-        if args.gen : 
-            bx = torch.LongTensor(buffer_size, *args.input_size).to(args.device).fill_(0)
-        else:
-            bx = torch.FloatTensor(buffer_size, *args.input_size).to(args.device).fill_(0)
+        bx = torch.FloatTensor(buffer_size, *args.input_size).to(args.device).fill_(0)
 
         by = torch.LongTensor(buffer_size).to(args.device).fill_(0)
         bt = torch.LongTensor(buffer_size).to(args.device).fill_(0)
-        logits = torch.FloatTensor(buffer_size, args.n_classes).to(args.device).fill_(0)
 
         self.current_index = 0
         self.n_seen_so_far = 0
@@ -36,12 +31,10 @@ class Buffer(nn.Module):
         self.register_buffer('bx', bx)
         self.register_buffer('by', by)
         self.register_buffer('bt', bt)
-        self.register_buffer('logits', logits)
 
         self.to_one_hot  = lambda x : x.new(x.size(0), args.n_classes).fill_(0).scatter_(1, x.unsqueeze(1), 1)
         self.arange_like = lambda x : torch.arange(x.size(0)).to(x.device)
         self.shuffle     = lambda x : x[torch.randperm(x.size(0))]
-
 
     @property
     def x(self):
@@ -68,9 +61,8 @@ class Buffer(nn.Module):
         Image.open('tmp.png').show()
         print(self.by[:self.current_index])
 
-    def add_reservoir(self, x, y, logits, t):
+    def add_reservoir(self, x, y, t):
         n_elem = x.size(0)
-        save_logits = logits is not None
 
         # add whatever still fits in the buffer
         place_left = max(0, self.bx.size(0) - self.current_index)
@@ -80,9 +72,6 @@ class Buffer(nn.Module):
             self.by[self.current_index: self.current_index + offset].data.copy_(y[:offset])
             self.bt[self.current_index: self.current_index + offset].fill_(t)
    
-            if save_logits: 
-                self.logits[self.current_index: self.current_index + offset].data.copy_(logits[:offset])
-        
             self.current_index += offset
             self.n_seen_so_far += offset
             
@@ -103,9 +92,6 @@ class Buffer(nn.Module):
         self.bx[idx_buffer] = x[idx_new_data]
         self.by[idx_buffer] = y[idx_new_data]
         self.bt[idx_buffer] = t
-
-        if save_logits: 
-            self.logits[idx_buffer] = logits[idx_new_data]
 
         self.n_seen_so_far += x.size(0)
        
