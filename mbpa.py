@@ -19,9 +19,16 @@ class megamodel(nn.Module):
         return out
 
 
-def init_keys(args):
-    key_gen = megamodel().to(args.device)
-    return key_gen
+def fetch_key_network(model, args):
+    if args.key_network == 'random_ensemble':
+        key_gen = megamodel().to(args.device)
+        return key_gen
+    elif args.key_network == 'pretrained':
+        from torchvision import models 
+        resnet = models.resnet18(pretrained=True).to('cuda')
+        return lambda x : resnet(F.upsample(x, scale_factor=2.))
+    elif args.key_network == 'hidden':
+        return model.return_hidden
 
 
 def find_closest(buffer, data_keys, args):

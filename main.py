@@ -12,6 +12,7 @@ from model  import ResNet18
 
 # arguments
 parser = argparse.ArgumentParser()
+parser.add_argument('--lr', type=float, default=0.1)
 parser.add_argument('--dataset', type=str, choices=['split_mnist', 'permuted_mnist'], default = 'split_cifar')
 parser.add_argument('--n_tasks', type=int, default=5)
 parser.add_argument('--n_epochs', type=int, default=1)
@@ -24,13 +25,13 @@ parser.add_argument('--n_runs', type=int, default=1, help='number of runs to ave
 parser.add_argument('--n_iters', type=int, default=1, help='training iterations on incoming batch')
 parser.add_argument('--rehearsal', type=int, default=1, help='whether to replay previous data')
 parser.add_argument('--hidden_dim', type=int, default=20)
-parser.add_argument('--mixup', action='store_true', help='use manifold mixup')
 
 # MbPA
 parser.add_argument('--mbpa', action='store_true')
 parser.add_argument('--mbpa_lr', type=float, default=0.1)
 parser.add_argument('--mbpa_iters', type=int, default=5)
 parser.add_argument('--mbpa_k', type=int, default=16)
+parser.add_argument('--key_network', type=str, choices=['pretrained', 'random_ensemble', 'hidden'], default='random_ensemble')
 args = parser.parse_args()
 
 # fixed for now
@@ -47,7 +48,7 @@ train_loader, test_loader  = [CLDataLoader(elem, args, train=t) for elem, t in z
 
 # fetch model and ship to GPU
 reset_model = lambda : ResNet18(args.n_classes, nf=args.hidden_dim).to(args.device)
-reset_opt   = lambda model : torch.optim.SGD(model.parameters(), lr=0.1)
+reset_opt   = lambda model : torch.optim.SGD(model.parameters(), lr=args.lr)
 
 all_models = []
 
@@ -81,27 +82,14 @@ for run in range(args.n_runs):
                 data, target = data.to(args.device), target.to(args.device)
                 
                 for _ in range(args.n_iters):
-                    train_idx, track_idx = buffer.split(args.buffer_batch_size if args.mixup else 0)
+                    train_idx, track_idx = buffer.split(0)
                     input_x, input_y = data, target
 
                     lamb = 1
                     hid = model.return_hidden(input_x)
 
-                    if train_idx.nelement() > 0 and args.mixup:
-                        lamb = np.random.beta(2, 2)
-                        hid_b = model.return_hidden(buffer.bx[train_idx])
-                        hid = lamb * hid + (1 - lamb) * hid_b
-                     
                     logits = model.linear(hid)
-                    loss_a = F.cross_entropy(logits, input_y, reduction='none')
-                    loss   = loss_a.sum() 
-
-                    if train_idx.nelement() > 0 and args.mixup: 
-                        loss_b = F.cross_entropy(logits, buffer.by[train_idx], reduction='none')
-                    else:
-                        loss_b = 0
-
-                    loss = (lamb * loss_a + (1 - lamb) * loss_b).sum() / loss_a.size(0)
+                    loss   = F.cross_entropy(logits, input_y)
                         
                     pred = logits.argmax(dim=1, keepdim=True)
                     correct += pred.eq(input_y.view_as(pred)).sum().item() 
@@ -142,7 +130,11 @@ with (torch.enable_grad if args.mbpa else torch.no_grad)():
 
         if args.mbpa:
             with torch.no_grad():
-                key_gen = MBPA.init_keys(args)
+                # leverage untrained models ?
+                key_gen = MBPA.fetch_key_network(model, args)
+
+                # leverage the trained model ?
+                # key_gen  = model.return_hidden
                 buffer.keys = key_gen(buffer.bx)
 
         for task, loader in enumerate(test_loader):
