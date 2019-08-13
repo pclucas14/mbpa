@@ -110,6 +110,13 @@ class Buffer(nn.Module):
             indices = torch.from_numpy(np.random.choice(bx.size(0), amt, replace=False)).to(self.args.device)
             return bx[indices], by[indices]
 
+    def sample_from_task(self, amt, task):
+        valid_indices = (self.t == task).nonzero().squeeze()
+        bx, by = self.bx[valid_indices], self.by[valid_indices]
+        indices = torch.from_numpy(np.random.choice(bx.size(0), amt, replace=False)).to(self.args.device)
+        return bx[indices], by[indices]
+        
+
     def split(self, amt):
         indices = torch.randperm(self.current_index).to(self.args.device)
         return indices[:amt], indices[amt:]
